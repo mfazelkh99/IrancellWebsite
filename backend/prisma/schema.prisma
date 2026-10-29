@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ----------------------------------------------------
+// ۱. جدول کاربران، پرسنل و ادمین‌ها
+// ----------------------------------------------------
+model User {
+  id        Int      @id @default(autoincrement())
+  fullName  String?
+  phone     String   @unique
+  password  String
+  role      Role     @default(USER) // نقش کاربر: عادی، پرسنل، ادمین
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders    Order[]   // ارتباط با سفارشات کاربر
+  crmNotes  CrmNote[] // ارتباط با نوت‌هایی که پرسنل ثبت می‌کنند
+}
+
+enum Role {
+  USER
+  STAFF
+  ADMIN
+}
+
+// ----------------------------------------------------
+// ۲. جدول محصولات (مودم‌ها و...) برای پنل ادمین
+// ----------------------------------------------------
+model Product {
+  id          Int      @id @default(autoincrement())
+  category    String   // pocket, desktop
+  name        String
+  model       String
+  network     String
+  price       String
+  badge       String?
+  isHot       Boolean  @default(false)
+  isEco       Boolean  @default(false)
+  description String   @db.Text
+  createdAt   DateTime @default(now())
+}
+
+// ----------------------------------------------------
+// ۳. جدول درخواست‌ها و سفارشات (خرید مودم، سیم‌کارت، شارژ و قبض)
+// ----------------------------------------------------
+model Order {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  type         String    // نوع درخواست: MODEM, SIMCARD, RECHARGE, BILL, CORPORATE
+  targetNumber String?   // شماره هدف (مثلاً برای شارژ یا مودم)
+  nationalCode String?   // کد ملی
+  status       Status    @default(PENDING)
+  details      String?   @db.Text 
+  followUpDate DateTime? // فیلد جدید: تاریخ و زمان مشخص‌شده برای پیگیری بعدی
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt // فیلد جدید: ثبت خودکار زمان آخرین تغییر وضعیت
+
+  user         User      @relation(fields: [userId], references: [id])
+  notes        CrmNote[] // نوت‌های پیگیری این سفارش
+}
+enum Status {
+  PENDING      // در انتظار بررسی
+  IN_PROGRESS  // در حال پیگیری (توسط پرسنل)
+  COMPLETED    // انجام شده
+  REJECTED     // لغو شده
+}
+
+// ----------------------------------------------------
+// ۴. جدول یادداشت‌های CRM (مخصوص پرسنل)
+// ----------------------------------------------------
+model CrmNote {
+  id        Int      @id @default(autoincrement())
+  orderId   Int
+  staffId   Int      // شناسه پرسنلی که نوت را ثبت کرده
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  order     Order    @relation(fields: [orderId], references: [id])
+  staff     User     @relation(fields: [staffId], references: [id])
+}

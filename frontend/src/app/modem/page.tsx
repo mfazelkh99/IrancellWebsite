@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
+import axios from "axios"; // اضافه شده برای ارتباط با بک‌اند
 
 type ModemCategory = "pocket" | "desktop";
 
@@ -18,7 +20,7 @@ interface ModemItem {
     isEco?: boolean;
     shortSpecs: {
         speed: string;
-        secondSpec: string; // برای جیبی ظرفیت باتری، برای رومیزی پورت‌ها/کاربران
+        secondSpec: string;
     };
     fullSpecs: {
         label: string;
@@ -29,7 +31,6 @@ interface ModemItem {
 
 // لیست مودم‌های رسمی بازار ایرانسل (جیبی و رومیزی)
 const modemsData: ModemItem[] = [
-    // --- مودم‌های جیبی ---
     {
         id: 1,
         category: "pocket",
@@ -98,8 +99,6 @@ const modemsData: ModemItem[] = [
         description:
             "مودمی بسیار سبک و کم‌حجم با پایداری اتصال عالی که به راحتی در جیب قرار می‌گیرد و اینترنت پرسرعت همراه را در هر نقطه‌ای در اختیار شما می‌گذارد.",
     },
-
-    // --- مودم‌های رومیزی (ثابت) ---
     {
         id: 4,
         category: "desktop",
@@ -171,7 +170,6 @@ const modemsData: ModemItem[] = [
     },
 ];
 
-// آیکون‌های کمکی
 const CheckBadgeIcon = () => (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 md:w-5 md:h-5 text-emerald-600 shrink-0">
         <path fillRule="evenodd" d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12Zm13.36-1.814a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clipRule="evenodd" />
@@ -191,33 +189,116 @@ const SpecIcon = () => (
 );
 
 export default function ModemPage() {
-    // استیت تب فعال (مودم‌های جیبی یا رومیزی)
+    const router = useRouter();
+
     const [activeCategory, setActiveCategory] = useState<ModemCategory>("pocket");
-
-    // استیت برای نمایش پاپ‌آپ جزئیات کامل مودم
     const [detailModem, setDetailModem] = useState<ModemItem | null>(null);
-
-    // استیت برای نمایش پاپ‌آپ درخواست خرید
     const [buyModem, setBuyModem] = useState<ModemItem | null>(null);
 
-    // شبیه‌سازی وضعیت لاگین کاربر
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    // استیت‌های مربوط به کاربر و فرم
+    const [user, setUser] = useState<{ fullName: string; phone: string } | null>(null);
     const [isSubmitted, setIsSubmitted] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    const loggedInUser = {
-        fullName: "علی محمدی",
-        phone: "09131234567",
+    // استیت‌های احراز هویت درون‌مودالی
+    const [showAuthForm, setShowAuthForm] = useState(false);
+    const [authTab, setAuthTab] = useState<"login" | "register">("login");
+    const [authPhone, setAuthPhone] = useState("");
+    const [authPassword, setAuthPassword] = useState("");
+    const [authFullName, setAuthFullName] = useState("");
+    const [authLoading, setAuthLoading] = useState(false);
+    const [authError, setAuthError] = useState("");
+
+    // بررسی وجود کاربر در لوکال استوریج در هنگام لود
+    useEffect(() => {
+        const storedUser = localStorage.getItem("user");
+        if (storedUser) {
+            setUser(JSON.parse(storedUser));
+        }
+    }, []);
+
+    const filteredModems = modemsData.filter((m) => m.category === activeCategory);
+
+    // باز کردن مودال درخواست خرید برای همه
+    const handleBuyClick = (modem: ModemItem) => {
+        setBuyModem(modem);
+        setIsSubmitted(false);
+        setShowAuthForm(false);
+        setAuthError("");
+        if (user) setAuthPhone(user.phone);
     };
 
-    // فیلتر کردن مودم‌ها بر اساس تب انتخابی
-    const filteredModems = modemsData.filter((m) => m.category === activeCategory);
+    // تابع ارسال سفارش به بک‌اند
+    const submitOrderToServer = async (tokenToUse: string, currentUser?: { fullName: string; phone: string }) => {
+        setIsSubmitting(true);
+        try {
+            await axios.post(
+                "http://localhost:5000/api/orders",
+                {
+                    type: "MODEM",
+                    targetNumber: currentUser ? currentUser.phone : authPhone,
+                    details: `درخواست خرید مودم ${buyModem?.category === 'pocket' ? 'جیبی' : 'رومیزی'} مدل: ${buyModem?.model}`
+                },
+                { headers: { Authorization: `Bearer ${tokenToUse}` } }
+            );
+
+            setIsSubmitted(true);
+            setShowAuthForm(false);
+        } catch (error) {
+            alert("خطا در ثبت سفارش. لطفاً مجدداً تلاش کنید.");
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    // هندلر کلیک روی تایید و ثبت سفارش
+    const handleInitialSubmit = () => {
+        if (!user) {
+            setShowAuthForm(true);
+            return;
+        }
+
+        const token = localStorage.getItem("token");
+        if (token) submitOrderToServer(token, user);
+    };
+
+    // هندلر فرم لاگین/ثبت‌نام درون مودال
+    const handleAuthSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setAuthLoading(true);
+        setAuthError("");
+
+        try {
+            const endpoint = authTab === "login" ? "/login" : "/register";
+            const payload = authTab === "login"
+                ? { phone: authPhone, password: authPassword }
+                : { fullName: authFullName, phone: authPhone, password: authPassword };
+
+            const response = await axios.post(`http://localhost:5000/api/auth${endpoint}`, payload);
+
+            const { token, user: newUser } = response.data;
+
+            localStorage.setItem("token", token);
+            localStorage.setItem("user", JSON.stringify(newUser));
+            setUser(newUser);
+
+            await submitOrderToServer(token, newUser);
+
+        } catch (error: any) {
+            if (error.response && error.response.data && error.response.data.message) {
+                setAuthError(error.response.data.message);
+            } else {
+                setAuthError("ارتباط با سرور برقرار نشد.");
+            }
+        } finally {
+            setAuthLoading(false);
+        }
+    };
 
     return (
         <div className="w-full flex-1 py-8 md:py-12 px-4">
-            {/* کانتینر اصلی هم‌تراز با سایر صفحات (۸۰ درصد در دسکتاپ) */}
             <div className="w-full md:w-[90%] lg:w-[80%] mx-auto space-y-8">
 
-                {/* هدر صفحه و دکمه بازگشت */}
                 <div className="flex flex-col gap-4">
                     <div className="flex items-start sm:items-center justify-between gap-2">
                         <div className="flex items-center gap-3">
@@ -234,7 +315,7 @@ export default function ModemPage() {
 
                         <Link
                             href="/"
-                            className="flex items-center gap-2 text-xs md:text-sm font-bold text-[#002B5E] bg-white px-4 py-2.5 rounded-2xl shadow-[0_0_15px_rgba(0,0,0,0.05)] border border-gray-200 hover:border-[#FFCC00] transition-all shrink-0"
+                            className="flex items-center gap-2 text-xs md:text-sm font-bold text-[#002B5E] bg-white px-4 py-2.5 rounded-2xl shadow-[0_0_15px_rgba(0,0,0,0.05)] border border-gray-200 hover:border-[#FFCC00] transition-all shrink-0 cursor-pointer"
                         >
                             <span>بازگشت</span>
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
@@ -243,7 +324,6 @@ export default function ModemPage() {
                         </Link>
                     </div>
 
-                    {/* بج‌های اعتماد (ارسال و پرداخت در محل) */}
                     <div className="flex flex-wrap items-center gap-2.5 pr-5">
                         <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 text-emerald-900 px-3 py-1.5 rounded-xl text-xs font-bold">
                             <CheckBadgeIcon />
@@ -260,17 +340,15 @@ export default function ModemPage() {
                     </div>
                 </div>
 
-                {/* تب‌های کپسولی بالای صفحه (مشابه طرح موبایل ارسالی) */}
                 <div className="bg-white p-2 rounded-full shadow-[0_0_20px_rgba(0,0,0,0.06)] border border-gray-200 max-w-xl mx-auto grid grid-cols-2 gap-2">
                     <button
                         type="button"
                         onClick={() => setActiveCategory("pocket")}
                         className={`py-3.5 px-4 rounded-full font-extrabold text-xs sm:text-sm md:text-base transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer ${activeCategory === "pocket"
-                                ? "bg-[#FFCC00] text-[#002B5E] shadow-md"
-                                : "bg-gray-100/80 text-gray-600 hover:bg-gray-200/70"
+                            ? "bg-[#FFCC00] text-[#002B5E] shadow-md"
+                            : "bg-gray-100/80 text-gray-600 hover:bg-gray-200/70"
                             }`}
                     >
-                        {/* آیکون مودم جیبی */}
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
                         </svg>
@@ -281,11 +359,10 @@ export default function ModemPage() {
                         type="button"
                         onClick={() => setActiveCategory("desktop")}
                         className={`py-3.5 px-4 rounded-full font-extrabold text-xs sm:text-sm md:text-base transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer ${activeCategory === "desktop"
-                                ? "bg-[#FFCC00] text-[#002B5E] shadow-md"
-                                : "bg-gray-100/80 text-gray-600 hover:bg-gray-200/70"
+                            ? "bg-[#FFCC00] text-[#002B5E] shadow-md"
+                            : "bg-gray-100/80 text-gray-600 hover:bg-gray-200/70"
                             }`}
                     >
-                        {/* آیکون مودم رومیزی */}
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z" />
                         </svg>
@@ -293,7 +370,6 @@ export default function ModemPage() {
                     </button>
                 </div>
 
-                {/* لیست کارت‌های مودم (تک ستونه در موبایل، ۲ ستونه در تبلت، ۳ ستونه در لپ‌تاپ) */}
                 <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredModems.map((modem) => (
                         <div
@@ -301,7 +377,6 @@ export default function ModemPage() {
                             className="bg-white rounded-[2rem] p-5 md:p-6 shadow-[0_0_25px_rgba(0,0,0,0.07)] hover:shadow-[0_0_35px_rgba(0,0,0,0.13)] border border-gray-200 hover:border-[#FFCC00] transition-all duration-300 flex flex-col justify-between group"
                         >
                             <div>
-                                {/* ردیف بالای کارت: تگ شبکه و بج وضعیت */}
                                 <div className="flex items-center justify-between gap-2 mb-4">
                                     <span className="text-xs font-extrabold px-3 py-1 rounded-full bg-[#002B5E]/10 text-[#002B5E]">
                                         شبکه {modem.network}
@@ -309,10 +384,10 @@ export default function ModemPage() {
                                     {modem.badge && (
                                         <span
                                             className={`text-[11px] font-bold px-2.5 py-1 rounded-full ${modem.isHot
-                                                    ? "bg-red-50 text-red-600 border border-red-200"
-                                                    : modem.isEco
-                                                        ? "bg-emerald-50 border border-emerald-200/80 text-emerald-900"
-                                                        : "bg-[#FFCC00]/25 text-[#002B5E]"
+                                                ? "bg-red-50 text-red-600 border border-red-200"
+                                                : modem.isEco
+                                                    ? "bg-emerald-50 border border-emerald-200/80 text-emerald-900"
+                                                    : "bg-[#FFCC00]/25 text-[#002B5E]"
                                                 }`}
                                         >
                                             {modem.isHot ? `🔥 ${modem.badge}` : modem.badge}
@@ -320,9 +395,7 @@ export default function ModemPage() {
                                     )}
                                 </div>
 
-                                {/* بخش میانی کارت: مشخصات و تصویر مودم (دقیقاً مشابه طرح موبایل) */}
                                 <div className="flex items-center justify-between gap-4 my-2">
-                                    {/* سمت راست: عنوان، مدل و دو ویژگی کلیدی */}
                                     <div className="space-y-2 flex-1">
                                         <h2 className="text-base md:text-lg font-extrabold text-gray-800 leading-snug">
                                             {modem.name}
@@ -343,7 +416,6 @@ export default function ModemPage() {
                                         </div>
                                     </div>
 
-                                    {/* سمت چپ: تصویر مودم */}
                                     <div className="w-24 h-24 sm:w-28 sm:h-28 bg-gray-50 rounded-2xl p-2 flex items-center justify-center shrink-0 border border-gray-100 group-hover:scale-105 transition-transform duration-300">
                                         <Image
                                             src="/images/home_icons/modem.png"
@@ -356,23 +428,17 @@ export default function ModemPage() {
                                 </div>
                             </div>
 
-                            {/* بخش پایینی کارت: کادر قیمت، دو دکمه اقدام و متن راهنما */}
                             <div className="mt-5 pt-4 border-t border-gray-100 space-y-3">
-                                {/* باکس قیمت مشابه طرح */}
                                 <div className="inline-block border border-gray-300 rounded-xl px-4 py-1.5 bg-gray-50/60">
                                     <span className="text-base md:text-lg font-black text-gray-800">
                                         {modem.price} <span className="text-xs font-bold text-gray-600">تومان</span>
                                     </span>
                                 </div>
 
-                                {/* دو دکمه کنار هم (درخواست خرید زرد + مشاهده جزئیات تیره) */}
                                 <div className="flex items-center gap-2.5 pt-1">
                                     <button
                                         type="button"
-                                        onClick={() => {
-                                            setBuyModem(modem);
-                                            setIsSubmitted(false);
-                                        }}
+                                        onClick={() => handleBuyClick(modem)}
                                         className="flex-1 py-3 px-3 bg-[#FFCC00] hover:bg-[#f2c200] text-[#002B5E] text-xs font-extrabold rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer text-center"
                                     >
                                         درخواست خرید (تماس پرسنل)
@@ -387,7 +453,6 @@ export default function ModemPage() {
                                     </button>
                                 </div>
 
-                                {/* متن راهنمای زیر دکمه‌ها مطابق تصویر */}
                                 <p className="text-[11px] text-gray-500 text-center pt-1">
                                     * پس از ثبت، کارشناسان ما جهت هماهنگی و ارسال با شما تماس می‌گیرند. *
                                 </p>
@@ -447,8 +512,7 @@ export default function ModemPage() {
                                 onClick={() => {
                                     const selected = detailModem;
                                     setDetailModem(null);
-                                    setBuyModem(selected);
-                                    setIsSubmitted(false);
+                                    handleBuyClick(selected);
                                 }}
                                 className="px-6 py-3 bg-[#FFCC00] hover:bg-[#f2c200] text-[#002B5E] text-xs md:text-sm font-extrabold rounded-xl shadow-md cursor-pointer"
                             >
@@ -459,11 +523,12 @@ export default function ModemPage() {
                 </div>
             )}
 
-            {/* پاپ‌آپ دوم: ثبت درخواست خرید مودم و بررسی لاگین */}
+            {/* پاپ‌آپ دوم: ثبت درخواست خرید مودم و بررسی لاگین درون‌مودالی */}
             {buyModem && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
                     <div className="bg-white rounded-[2rem] max-w-md w-full p-6 md:p-8 shadow-2xl border border-gray-100">
-                        {!isSubmitted ? (
+
+                        {!isSubmitted && !showAuthForm && (
                             <div className="space-y-5 text-center">
                                 <div className="w-14 h-14 bg-[#FFCC00]/20 text-[#002B5E] rounded-2xl flex items-center justify-center mx-auto font-bold">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-8 h-8">
@@ -472,7 +537,7 @@ export default function ModemPage() {
                                 </div>
 
                                 <h3 className="text-lg font-extrabold text-[#002B5E]">
-                                    ثبت سفارش خرید مودم (پرداخت در محل / تلفنی)
+                                    ثبت سفارش خرید مودم
                                 </h3>
 
                                 <div className="bg-gray-50 p-4 rounded-2xl border border-gray-200 space-y-2 text-xs md:text-sm text-right">
@@ -489,53 +554,32 @@ export default function ModemPage() {
                                         <span className="font-extrabold text-gray-800">{buyModem.price} تومان</span>
                                     </div>
 
-                                    {isLoggedIn && (
+                                    {user && (
                                         <div className="pt-2 mt-2 border-t border-gray-200 space-y-1 bg-emerald-50/60 p-2.5 rounded-xl">
                                             <div className="flex justify-between items-center text-xs">
                                                 <span className="text-emerald-800">خریدار:</span>
-                                                <span className="font-bold text-emerald-950">{loggedInUser.fullName}</span>
+                                                <span className="font-bold text-emerald-950">{user.fullName}</span>
                                             </div>
                                             <div className="flex justify-between items-center text-xs">
-                                                <span className="text-emerald-800">شماره تماس هماهنگی:</span>
-                                                <span dir="ltr" className="font-bold text-emerald-950">{loggedInUser.phone}</span>
+                                                <span className="text-emerald-800">شماره هماهنگی:</span>
+                                                <span dir="ltr" className="font-bold text-emerald-950">{user.phone}</span>
                                             </div>
                                         </div>
                                     )}
                                 </div>
 
-                                {!isLoggedIn ? (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-gray-600 leading-relaxed">
-                                            برای ثبت سفارش و تماس همکاران ما جهت ارسال مودم، لطفاً ابتدا وارد حساب کاربری خود شوید.
-                                        </p>
-                                        <div className="flex flex-col gap-2">
-                                            <Link
-                                                href="/profile"
-                                                className="w-full py-3.5 bg-[#FFCC00] hover:bg-[#f2c200] text-[#002B5E] font-extrabold rounded-xl shadow-sm transition-all"
-                                            >
-                                                ورود / ثبت‌نام سریع
-                                            </Link>
-                                            <button
-                                                onClick={() => setIsLoggedIn(true)}
-                                                className="text-[11px] text-blue-600 underline cursor-pointer py-1"
-                                            >
-                                                (تست توسعه: فرض کن کاربر لاگین است)
-                                            </button>
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        <p className="text-xs text-gray-600 leading-relaxed">
-                                            هیچ هزینه‌ای در سایت دریافت نمی‌شود. پس از تایید، کارشناسان مرکز ۶۵۰۱۶ جهت هماهنگی آدرس و نحوه تحویل با شما تماس می‌گیرند.
-                                        </p>
-                                        <button
-                                            onClick={() => setIsSubmitted(true)}
-                                            className="w-full py-3.5 bg-[#FFCC00] hover:bg-[#f2c200] text-[#002B5E] font-extrabold rounded-xl shadow-md transition-all cursor-pointer"
-                                        >
-                                            تایید و ثبت سفارش مودم
-                                        </button>
-                                    </div>
-                                )}
+                                <div className="space-y-4">
+                                    <p className="text-xs text-gray-600 leading-relaxed">
+                                        هیچ هزینه‌ای در سایت دریافت نمی‌شود. پس از تایید، کارشناسان مرکز جهت هماهنگی آدرس و نحوه تحویل با شما تماس می‌گیرند.
+                                    </p>
+                                    <button
+                                        onClick={handleInitialSubmit}
+                                        disabled={isSubmitting}
+                                        className={`w-full py-3.5 text-[#002B5E] font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${isSubmitting ? "bg-[#f2c200]/70" : "bg-[#FFCC00] hover:bg-[#f2c200]"}`}
+                                    >
+                                        {isSubmitting ? "در حال ثبت..." : "تایید و ثبت سفارش مودم"}
+                                    </button>
+                                </div>
 
                                 <button
                                     onClick={() => setBuyModem(null)}
@@ -544,7 +588,97 @@ export default function ModemPage() {
                                     انصراف و بازگشت
                                 </button>
                             </div>
-                        ) : (
+                        )}
+
+                        {/* فرم ورود مینیاتوری */}
+                        {!isSubmitted && showAuthForm && (
+                            <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                <div className="bg-[#002B5E] text-white p-4 rounded-2xl mb-4 flex items-center justify-between shadow-md">
+                                    <div>
+                                        <h4 className="text-sm font-black mb-1">نیاز به ورود به حساب</h4>
+                                        <p className="text-xs text-blue-200 font-bold">برای ثبت سفارش لطفاً وارد شوید</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setShowAuthForm(false)}
+                                        className="text-xs font-bold bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        بازگشت
+                                    </button>
+                                </div>
+
+                                <div className="flex p-1 bg-gray-100 rounded-xl mb-4">
+                                    <button
+                                        onClick={() => { setAuthTab("login"); setAuthError(""); }}
+                                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${authTab === "login" ? "bg-white text-[#002B5E] shadow-sm" : "text-gray-500"}`}
+                                    >
+                                        ورود
+                                    </button>
+                                    <button
+                                        onClick={() => { setAuthTab("register"); setAuthError(""); }}
+                                        className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${authTab === "register" ? "bg-white text-[#002B5E] shadow-sm" : "text-gray-500"}`}
+                                    >
+                                        ثبت‌نام جدید
+                                    </button>
+                                </div>
+
+                                {authError && (
+                                    <div className="mb-4 p-2 bg-red-50 text-red-600 text-[11px] font-bold rounded-lg text-center border border-red-100">
+                                        {authError}
+                                    </div>
+                                )}
+
+                                <form onSubmit={handleAuthSubmit} className="space-y-3">
+                                    {authTab === "register" && (
+                                        <div className="space-y-1">
+                                            <label className="text-[11px] font-bold text-gray-700">نام و نام خانوادگی</label>
+                                            <input
+                                                type="text"
+                                                value={authFullName}
+                                                onChange={(e) => setAuthFullName(e.target.value)}
+                                                required={authTab === "register"}
+                                                className="w-full h-10 px-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-[#FFCC00] outline-none text-xs font-bold"
+                                            />
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-1">
+                                        <label className="text-[11px] font-bold text-gray-700">شماره موبایل</label>
+                                        <input
+                                            type="tel"
+                                            dir="ltr"
+                                            value={authPhone}
+                                            onChange={(e) => setAuthPhone(e.target.value)}
+                                            required
+                                            maxLength={11}
+                                            className="w-full h-10 px-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-[#FFCC00] outline-none text-left text-sm font-extrabold tracking-wider"
+                                        />
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <label className="text-[11px] font-bold text-gray-700">رمز عبور</label>
+                                        <input
+                                            type="password"
+                                            dir="ltr"
+                                            value={authPassword}
+                                            onChange={(e) => setAuthPassword(e.target.value)}
+                                            required
+                                            className="w-full h-10 px-3 rounded-lg bg-gray-50 border border-gray-200 focus:border-[#FFCC00] outline-none text-left text-sm font-extrabold tracking-wider"
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={authLoading || isSubmitting}
+                                        className="w-full h-12 mt-2 bg-[#FFCC00] hover:bg-[#f2c200] text-[#002B5E] font-black text-sm rounded-xl shadow-sm transition-all cursor-pointer"
+                                    >
+                                        {authLoading || isSubmitting ? "در حال پردازش..." : (authTab === "login" ? "ورود و ثبت سفارش" : "ثبت‌نام و ارسال سفارش")}
+                                    </button>
+                                </form>
+                            </div>
+                        )}
+
+                        {/* وضعیت نهایی ثبت سفارش */}
+                        {isSubmitted && (
                             <div className="space-y-5 text-center py-4">
                                 <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="w-9 h-9">
@@ -555,13 +689,16 @@ export default function ModemPage() {
                                     درخواست خرید مودم با موفقیت ثبت شد!
                                 </h3>
                                 <p className="text-xs text-gray-500 leading-relaxed">
-                                    سفارش شما برای <strong>{buyModem.name} (مدل {buyModem.model})</strong> در پنل کارشناسان مرکز ارتباط با ایرانسل ثبت گردید. همکاران ما به زودی جهت هماهنگی ارسال و فعال‌سازی سیم‌کارت با شما تماس می‌گیرند.
+                                    سفارش شما برای <strong>{buyModem.name} (مدل {buyModem.model})</strong> در پنل کارشناسان مرکز ارتباط با ایرانسل ثبت گردید. همکاران ما به زودی جهت هماهنگی ارسال با شما تماس می‌گیرند.
                                 </p>
                                 <button
-                                    onClick={() => setBuyModem(null)}
+                                    onClick={() => {
+                                        setBuyModem(null);
+                                        setIsSubmitted(false);
+                                    }}
                                     className="w-full py-3 bg-[#002B5E] text-white font-bold rounded-xl text-sm cursor-pointer"
                                 >
-                                    متوجه شدم
+                                    بستن
                                 </button>
                             </div>
                         )}
